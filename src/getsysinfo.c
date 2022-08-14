@@ -35,6 +35,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <Windows.h>
 
+static USHORT g_machines[] = {
+	0x1, 0x14c, 0x160, 0x162, 0x166, 0x168, 0x169, 0x184,
+	0x1a2, 0x1a3, 0x1a4, 0x1a6, 0x1a8, 0x1c0, 0x1c2, 0x1c4, 0x1d3, 0x1f0,
+	0x1f1, 0x200, 0x266, 0x284, 0x366, 0x466, 0x520, 0xcef, 0xebc, 0x8664,
+	0x9041, 0xAA64, 0xC0EE
+};
+
 static void PrintWindowsDir(void);
 static void PrintSystemDir(void);
 static void PrintSysWOW64Dir(void);
@@ -144,14 +151,10 @@ static void PrintSysWOW64Dir(void)
 	if(!buf) return;
 
 	if(GetSystemWow64Directory2W_funcptr) {
-		USHORT machines[] = {0x1, 0x14c, 0x160, 0x162, 0x166, 0x168, 0x169, 0x184,
-			0x1a2, 0x1a3, 0x1a4, 0x1a6, 0x1a8, 0x1c0, 0x1c2, 0x1c4, 0x1d3, 0x1f0,
-			0x1f1, 0x200, 0x266, 0x284, 0x366, 0x466, 0x520, 0xcef, 0xebc, 0x8664,
-			0x9041, 0xAA64, 0xC0EE};
 		size_t i;
 
-		for(i = 0; i < sizeof(machines)/sizeof(USHORT); i++) {
-			ret = GetSystemWow64Directory2W_funcptr(buf, bufsize + 1, machines[i]);
+		for(i = 0; i < sizeof(g_machines)/sizeof(USHORT); i++) {
+			ret = GetSystemWow64Directory2W_funcptr(buf, bufsize + 1, g_machines[i]);
 
 			if(!ret) continue;
 
@@ -166,11 +169,11 @@ static void PrintSysWOW64Dir(void)
 					buf = _buf;
 				}
 
-				ret = GetSystemWow64Directory2W_funcptr(buf, bufsize+1, machines[i]);
+				ret = GetSystemWow64Directory2W_funcptr(buf, bufsize+1, g_machines[i]);
 				if(ret > bufsize) continue;
 			}
 
-			wprintf(L"WOW64 System folder for %ls: %ls\n", GetMachineName(machines[i]), buf);
+			wprintf(L"WOW64 System folder for %ls: %ls\n", GetMachineName(g_machines[i]), buf);
 		}
 	} else {
 		ret = GetSystemWow64DirectoryW(buf, bufsize);
@@ -313,9 +316,6 @@ static IsWow64GuestMachineSupported_type IsWow64GuestMachineSupported_funcptr = 
 
 static void PrintWow64SupportedGuestMachines(void)
 {
-	USHORT machines[] = {0x1, 0x14c, 0x160, 0x162, 0x166, 0x168, 0x169, 0x184, 0x1a2, 0x1a3,
-		0x1a4, 0x1a6, 0x1a8, 0x1c0, 0x1c2, 0x1c4, 0x1d3, 0x1f0, 0x1f1, 0x200, 0x266,
-		0x284, 0x366, 0x466, 0x520, 0xcef, 0xebc, 0x8664, 0x9041, 0xAA64, 0xC0EE};
 	size_t i;
 	HANDLE kernel32_handle;
 
@@ -326,15 +326,15 @@ static void PrintWow64SupportedGuestMachines(void)
 	if(!IsWow64GuestMachineSupported_funcptr)
 		return;
 
-	for(i = 0; i < sizeof(machines)/sizeof(USHORT); i++) {
+	for(i = 0; i < sizeof(g_machines)/sizeof(USHORT); i++) {
 		HRESULT result;
 		BOOL machine_is_supported = 0;
 
-		result = IsWow64GuestMachineSupported_funcptr(machines[i], &machine_is_supported);
+		result = IsWow64GuestMachineSupported_funcptr(g_machines[i], &machine_is_supported);
 		if(result != S_OK) continue;
 
 		if(machine_is_supported)
-			wprintf(L"Supported WOW64 Guest Machine: %ls\n", GetMachineName(machines[i]));
+			wprintf(L"Supported WOW64 Guest Machine: %ls\n", GetMachineName(g_machines[i]));
 	}
 
 }
