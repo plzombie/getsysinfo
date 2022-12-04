@@ -32,6 +32,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <wchar.h>
 
 #define _WIN32_WINNT 0x0501
+//#define _WIN32_WINNT 0x0A00
 
 #include <Windows.h>
 
@@ -52,6 +53,7 @@ static void PrintSystemInfo(void);
 static void PrintNativeSystemInfo(void);
 static void PrintSystemInfoStruct(LPSYSTEM_INFO si);
 static void PrintProcessorGroupInfo(void);
+static void PrintCpuSets(void);
 
 int main(void)
 {
@@ -63,6 +65,7 @@ int main(void)
 	PrintSystemInfo();
 	PrintNativeSystemInfo();
 	PrintProcessorGroupInfo();
+	PrintCpuSets();
 	getc(stdin);
 
 	return 0;
@@ -422,4 +425,159 @@ void PrintProcessorGroupInfo(void)
 			wprintf(L"\tGroup %hu has %u processors\n", i, processor_count);
 		}
 	}
+}
+
+#ifndef SYSTEM_CPU_SET_INFORMATION_PARKED
+#define SYSTEM_CPU_SET_INFORMATION_PARKED 0x1
+#define SYSTEM_CPU_SET_INFORMATION_ALLOCATED 0x2
+#define SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS 0x3
+#define SYSTEM_CPU_SET_INFORMATION_REALTIME 0x4
+
+typedef enum {
+	CpuSetInformation
+} CPU_SET_INFORMATION_TYPE;
+
+typedef struct {
+	DWORD Size;
+	CPU_SET_INFORMATION_TYPE Type;
+	union {
+		struct {
+			DWORD Id;
+			WORD Group;
+			BYTE LogicalProcessorIndex;
+			BYTE CoreIndex;
+			BYTE LastLevelCacheIndex;
+			BYTE NumaNodeIndex;
+			BYTE EfficiencyClass;
+			union {
+				BYTE AllFlags;
+				struct {
+					BYTE Parked : 1;
+					BYTE Allocated : 1;
+					BYTE AllocatedToTargetProcess : 1;
+					BYTE RealTime : 1;
+					BYTE ReservedFlags : 4;
+				} DUMMYSTRUCTNAME;
+			} DUMMYUNIONNAME2;
+			union {
+				DWORD Reserved;
+				BYTE SchedulingClass;
+			};
+			DWORD64 AllocationTag;
+		} CpuSet;
+	} DUMMYUNIONNAME;
+} SYSTEM_CPU_SET_INFORMATION;
+#endif
+
+typedef BOOL (__stdcall *GetSystemCpuSetInformation_type)(SYSTEM_CPU_SET_INFORMATION *Information, ULONG BufferLength, PULONG ReturnedLength, HANDLE Process, ULONG Flags);
+static GetSystemCpuSetInformation_type GetSystemCpuSetInformation_funcptr;
+typedef BOOL (__stdcall *GetProcessDefaultCpuSets_type)(HANDLE Process, PULONG CpuSetIds, ULONG CpuSetIdCount, PULONG RequiredIdCount);
+static GetProcessDefaultCpuSets_type GetProcessDefaultCpuSets_funcptr;
+
+static void PrintCpuSet(SYSTEM_CPU_SET_INFORMATION *cpu_set_info)
+{
+	if(cpu_set_info->Type != CpuSetInformation) return;
+	wprintf(L"CPU Set:\n");
+	wprintf(L"\tCPU Set Id %u\n", cpu_set_info->CpuSet.Id);
+	wprintf(L"\tProcessor Group %hu\n", cpu_set_info->CpuSet.Group);
+	wprintf(L"\tLogical Processor Index %hhu\n", cpu_set_info->CpuSet.LogicalProcessorIndex);
+	wprintf(L"\tCore Index %hhu\n", cpu_set_info->CpuSet.CoreIndex);
+	wprintf(L"\tLast Level Cache Index %hhu\n", cpu_set_info->CpuSet.LastLevelCacheIndex);
+	wprintf(L"\tNuma Node Index %hhu\n", cpu_set_info->CpuSet.NumaNodeIndex);
+	wprintf(L"\tEfficiency Class (higher is faster) %hhu\n", cpu_set_info->CpuSet.EfficiencyClass);
+	wprintf(L"\tAll Flags %hhx\n", cpu_set_info->CpuSet.AllFlags);
+	if(cpu_set_info->CpuSet.AllFlags & SYSTEM_CPU_SET_INFORMATION_PARKED)
+		wprintf(L"\t\tParked flag\n");
+	if(cpu_set_info->CpuSet.AllFlags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED)
+		wprintf(L"\t\tAllocated flag\n");
+	if(cpu_set_info->CpuSet.AllFlags & SYSTEM_CPU_SET_INFORMATION_REALTIME)
+		wprintf(L"\t\tRealtime flag");
+	wprintf(L"\tAllocation Tag %llu\n", cpu_set_info->CpuSet.AllocationTag);
+}
+
+static void PrintCpuSets(void)
+{
+	ULONG req_id_count = 0, id_count, *cpu_set_ids, i;
+	HANDLE proc_handle;
+
+	ULONG cpu_set_info_len, cpu_set_info_ret_len;
+	SYSTEM_CPU_SET_INFORMATION *cpu_set_info = 0, *p_cpu_set_info;
+
+	HANDLE kernel32_handle;
+
+	kernel32_handle = GetModuleHandleW(L"kernel32.dll");
+	if (!kernel32_handle) return;
+	GetSystemCpuSetInformation_funcptr = (GetSystemCpuSetInformation_type)GetProcAddress(kernel32_handle, "GetSystemCpuSetInformation");
+	GetProcessDefaultCpuSets_funcptr = (GetProcessDefaultCpuSets_type)GetProcAddress(kernel32_handle, "GetProcessDefaultCpuSets");
+
+	if(!GetSystemCpuSetInformation_funcptr || !GetProcessDefaultCpuSets_funcptr) {
+		wprintf(L"CPU Sets not supported\n");
+
+		return;
+	}
+
+	proc_handle = GetCurrentProcess();
+
+	GetSystemCpuSetInformation_funcptr(0, 0, &cpu_set_info_ret_len, 0, 0); // It returns FALSE/122 on NULL buffer
+
+	cpu_set_info_len = cpu_set_info_ret_len;
+	cpu_set_info = malloc(cpu_set_info_len);
+	if(!cpu_set_info) {
+		wprintf(L"Can't retrieve CPU sets\n");
+		free(cpu_set_info);
+
+		return;
+	}
+
+	if(!GetSystemCpuSetInformation_funcptr(cpu_set_info, cpu_set_info_len, &cpu_set_info_ret_len, 0, 0)) {
+		wprintf(L"Can't retrieve CPU sets\n");
+		free(cpu_set_info);
+
+		return;
+	}
+
+	p_cpu_set_info = cpu_set_info;
+	while(1) {
+		if((size_t)((char *)p_cpu_set_info-(char *)cpu_set_info) >= (size_t)cpu_set_info_len) break;
+
+		PrintCpuSet(p_cpu_set_info);
+
+		p_cpu_set_info = (SYSTEM_CPU_SET_INFORMATION *)((char *)p_cpu_set_info + p_cpu_set_info->Size);
+	}
+
+	free(cpu_set_info);
+
+	// Retrieve processor CPU sets
+
+	if(!GetProcessDefaultCpuSets_funcptr(proc_handle, NULL, 0, &req_id_count)) {
+		wprintf(L"Can't retrieve CPU sets for process\n");
+
+		return;
+	}
+
+	id_count = req_id_count;
+	if(id_count) {
+		cpu_set_ids = malloc(sizeof(ULONG)*id_count);
+		if(!cpu_set_ids) {
+			wprintf(L"Can't retrieve CPU sets for process\n");
+
+			return;
+		}
+
+		if(!GetProcessDefaultCpuSets_funcptr(proc_handle, cpu_set_ids, id_count, &req_id_count)) {
+			wprintf(L"Can't retrieve CPU sets for process\n");
+			free(cpu_set_ids);
+
+			return;
+		}
+	
+		wprintf(L"CPU Sets for process: ");
+	
+		for(i = 0; i < id_count; i++)
+			wprintf(L"%u ", cpu_set_ids[i]);
+		wprintf(L"\n");
+
+		free(cpu_set_ids);
+	} else
+		wprintf(L"No CPU Sets for process\n");
 }
