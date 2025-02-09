@@ -197,9 +197,13 @@ static void PrintSysWOW64Dir(void)
 				free(buf);
 				return;
 			}
-		}
+		} else if(ret == 0)
+			*buf = 0;
 
-		wprintf(L"WOW64 System folder: %ls\n", buf);
+		if(*buf)
+			wprintf(L"WOW64 System folder: %ls\n", buf);
+		else
+			wprintf(L"There is no WOW64 System folder\n");
 	}
 }
 
